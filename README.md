@@ -1,0 +1,99 @@
+# Auditorías 5S — Frontend (GitHub Pages)
+
+App estática (HTML/CSS/JS, sin build) para cargar y consultar Auditorías 5S
+de Escorial (Planta / Pañol / Oficina). Se conecta a la API en
+`auditorias-5s-api` (Cloudflare Worker + Neon + R2).
+
+## 1. Configurar la URL de la API
+
+Editá `js/config.js` y reemplazá el placeholder por la URL real del Worker
+(la que te dio `wrangler deploy` en el repo de la API):
+
+```js
+export const API_BASE = window.__API_BASE__ || 'https://auditorias-5s-api.TU-SUBDOMINIO.workers.dev';
+```
+
+## 2. Publicar en GitHub Pages
+
+```bash
+git init
+git add .
+git commit -m "Auditorías 5S — v1"
+git remote add origin https://github.com/diegortizdao-collab/Auditorias-5S.git
+git push -u origin main
+```
+
+En GitHub: **Settings → Pages → Deploy from a branch → main / (root)**.
+La app queda en `https://diegortizdao-collab.github.io/Auditorias-5S/`.
+
+Después volvé al repo de la API y poné esa URL en `ALLOWED_ORIGIN`
+(`wrangler.toml`), y volvé a desplegar el Worker (`npx wrangler deploy`) para
+que el CORS deje pasar los pedidos del frontend ya publicado.
+
+## Estructura
+
+- `index.html` — shell de la app (topbar, navegación, `<main>`).
+- `css/style.css` — mismo sistema de diseño ya validado en el preview
+  (paleta celeste Escorial, Barlow Condensed + IBM Plex Sans/Mono).
+- `js/config.js` — URL de la API.
+- `js/api.js` — wrapper de `fetch` para cada endpoint.
+- `js/app.js` — router (hash) + las pantallas (Selección, Formulario,
+  Evaluación, Dashboard, Informe, Plan de Acción).
+- `js/charts.js` — genera los SVG de radar / evolución / comparativo con
+  datos reales (misma geometría que el preview de diseño, ahora calculada
+  dinámicamente).
+- `js/xlsx-export.js` — genera el Informe en `.xlsx`: Hoja 1 (réplica exacta
+  de la solapa "8. Auditoría 5S y KPI") + hoja "Plan de Accion" con las
+  acciones de esa auditoría, usando ExcelJS (cargado por CDN).
+- `assets/` — logos de Escorial y SPE.
+
+## Cómo se usa
+
+1. **Selección** — elegís tipo (Pañol / Planta / Oficina) y dónde es la
+   auditoría, y creás el registro. Si ese sector ya tiene acciones
+   correctivas pendientes de una auditoría anterior, se pasa directo a
+   **Revisión** en vez de al Formulario.
+2. **Revisión de Plan de Acción** *(solo aparece si hay algo pendiente de la
+   vez pasada en ese mismo sector)* — se listan las acciones abiertas /
+   en proceso de auditorías anteriores, agrupadas por ítem. Por cada una se
+   puede marcar **"✓ Marcar cumplida"** (la cierra, con fecha de cierre de
+   hoy), y para el ítem correspondiente aparece la escala 0/1/3/5 para
+   puntuarlo ahí mismo, en base a lo que se ve al revisar si la acción
+   realmente se cumplió. Ese puntaje queda cargado en la auditoría de hoy —
+   así es como el cierre de una acción se termina reflejando en el puntaje
+   de la auditoría siguiente, no como algo separado. Al continuar, ese ítem
+   ya aparece puntuado (y editable) al llegar a Evaluación.
+3. **Formulario** — completás el encabezado (evaluador, turno, etc.). Tiene
+   también un acceso directo a "Revisar plan de acción anterior" por si se
+   quiere volver a mirar.
+4. **Evaluación** — puntuás cada ítem (0/1/3/5), con comentario y foto
+   opcionales. El puntaje se guarda al toque, no hace falta "guardar todo"
+   al final. Si un ítem queda en **0 o 1**, la IA (Cloudflare Workers AI)
+   sugiere automáticamente una acción correctiva para ese ítem — se muestra
+   ahí mismo, debajo del ítem, con un botón "↻" para pedirle otra sugerencia
+   si no convence. También se puede agregar a mano cualquier cantidad de
+   acciones manuales sobre un ítem ("+ Agregar acción manual"), con
+   responsable y fecha de vencimiento opcionales.
+5. **Informe** — al finalizar, se genera automáticamente la Hoja 1 (idéntica
+   al Excel que exige la norma) más una **Hoja 3 · Plan de Acción** con
+   todas las acciones que dejó esa auditoría (editable ahí mismo, con el
+   mismo selector de estado), y se puede descargar todo en `.xlsx`
+   (2 hojas: "Hoja 1" y "Plan de Accion").
+6. **Dashboard** — radar, evolución vs. objetivo mensual y comparativo por
+   sector, filtrable por tipo / planta / UET / sector.
+7. **Plan de Acción** — pantalla independiente de la Evaluación (accesible
+   desde Selección, Dashboard y desde cada Evaluación) con todas las
+   acciones —sugeridas por IA y manuales— de todas las auditorías, marcadas
+   con su origen (🤖 IA / ✋ Manual). Se filtra por estado (abierta / en
+   proceso / cerrada), tipo, planta y sector, y el estado de cada acción se
+   puede cambiar ahí mismo, sin entrar a la auditoría.
+
+Sin login (v1): cualquiera con el link puede cargar y ver auditorías.
+
+Todo el flujo (crear → revisión de acciones pendientes → puntuar → foto →
+cerrar → informe con Hoja 3 → dashboard → plan de acción) fue probado de
+punta a punta con datos reales antes de la entrega, incluyendo el caso sin
+conexión a Workers AI (el puntaje se guarda igual, la sugerencia
+simplemente no aparece esa vez) y el ciclo completo de abrir una auditoría
+nueva sobre un sector con una acción pendiente, cerrarla en Revisión,
+puntuar el ítem ahí mismo, y verlo ya cargado al llegar a Evaluación.
