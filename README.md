@@ -53,9 +53,13 @@ que el CORS deje pasar los pedidos del frontend ya publicado.
 ## Cómo se usa
 
 1. **Selección** — elegís tipo (Pañol / Planta / Oficina) y dónde es la
-   auditoría, y creás el registro. Si ese sector ya tiene acciones
-   correctivas pendientes de una auditoría anterior, se pasa directo a
-   **Revisión** en vez de al Formulario.
+   auditoría, y creás el registro. Para tipo Planta la ubicación es
+   Planta → UET → Sector, en cascada real: el combo de Sector solo se
+   habilita después de elegir la UET, y muestra únicamente los sectores de
+   esa UET (agrupados en subgrupos como "Soldadura" o "Pintura" cuando la
+   UET los tiene). Si ese sector ya tiene acciones correctivas pendientes de
+   una auditoría anterior, se pasa directo a **Revisión** en vez de al
+   Formulario.
 2. **Revisión de Plan de Acción** *(solo aparece si hay algo pendiente de la
    vez pasada en ese mismo sector)* — se listan las acciones abiertas /
    en proceso de auditorías anteriores, agrupadas por ítem. Por cada una se
@@ -95,8 +99,14 @@ que el CORS deje pasar los pedidos del frontend ya publicado.
    servidor de correo de por medio — por eso no requiere dominio propio ni
    configuración adicional; el usuario decide si finalmente lo manda, y
    puede editar el borrador o cancelarlo antes de enviar.
-6. **Dashboard** — radar, evolución vs. objetivo mensual y comparativo por
-   sector, filtrable por tipo / planta / UET / sector.
+6. **Dashboard** — filtrable por tipo / planta / UET / sector / año / mes
+   ("Todos" en año o mes promedia todas las fechas). El radar y el puntaje
+   total muestran el **promedio** de todas las auditorías que matchean el
+   segmentador elegido (no solo la última — con un dato de contexto aparte,
+   "Última auditoría", para saber quién la hizo y cuándo), la evolución
+   mensual sigue siendo Objetivo vs. Auditado para un año puntual, y hay tres
+   comparativos (todos como promedio, no como última auditoría): por
+   sector, por UET y por planta.
 7. **Plan de Acción** — pantalla independiente de la Evaluación (accesible
    desde Selección, Dashboard y desde cada Evaluación) con todas las
    acciones —sugeridas por IA y manuales— de todas las auditorías, marcadas
@@ -105,6 +115,12 @@ que el CORS deje pasar los pedidos del frontend ya publicado.
    puede cambiar ahí mismo, sin entrar a la auditoría.
 
 Sin login (v1): cualquiera con el link puede cargar y ver auditorías.
+
+Pie de página con crédito de autoría ("Desarrollado por Mgter. Diego Ortiz —
+Líder de Mejora Continua | Consultor ISO") — estándar a incluir en toda app
+nueva que se genere para Escorial / Silver / freelance (título genérico
+multiempresa, igual al de su LinkedIn, en vez del cargo puntual en cada
+empresa).
 
 Todo el flujo (crear → revisión de acciones pendientes → puntuar → foto →
 cerrar → informe con Hoja 3 → dashboard → plan de acción) fue probado de

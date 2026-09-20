@@ -19,6 +19,24 @@ function hoyISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
+// Arma las <option> de Sector para una UET puntual: primero los sectores que
+// cuelgan directo de la UET, después uno o más <optgroup> por cada grupo
+// intermedio (ej. "Soldadura" dentro de UET 4, "Pintura"/"Prensa" dentro de
+// UET 5) — así una UET grande no se ve como una lista plana de 7 sectores
+// sin ningún criterio.
+function renderSectorOptionsHtml(sectoresDeUet, gruposDeUet, selectedId) {
+  const directos = sectoresDeUet.filter((s) => !s.grupo_id).sort((a, b) => a.orden - b.orden);
+  const opt = (s) => `<option value="${s.id}" ${s.id === selectedId ? 'selected' : ''}>${esc(s.nombre)}</option>`;
+  let html = directos.map(opt).join('');
+  const grupos = [...gruposDeUet].sort((a, b) => a.orden - b.orden);
+  for (const g of grupos) {
+    const sectoresGrupo = sectoresDeUet.filter((s) => s.grupo_id === g.id).sort((a, b) => a.orden - b.orden);
+    if (!sectoresGrupo.length) continue;
+    html += `<optgroup label="${esc(g.nombre)}">${sectoresGrupo.map(opt).join('')}</optgroup>`;
+  }
+  return html;
+}
+
 function setNav(crumbs) {
   nav.innerHTML = crumbs.map((c, i) => {
     const isLast = i === crumbs.length - 1;
@@ -121,17 +139,21 @@ async function viewSeleccion() {
                 </select>
               </div>
               <div class="field">
-                <label>UET (opcional)</label>
+                <label>UET</label>
                 <select id="sel-uet">
-                  <option value="">No aplica / sin definir</option>
+                  <option value="">Seleccionar</option>
                   ${(catalogos.plantas.find((p) => p.id === state.plantaId)?.uets || []).map((u) => `<option value="${u.id}" ${u.id === state.uetId ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('')}
                 </select>
               </div>
               <div class="field">
                 <label>Sector</label>
-                <select id="sel-uet-sector">
-                  <option value="">Seleccionar</option>
-                  ${(catalogos.plantas.find((p) => p.id === state.plantaId)?.uet_sectores || []).map((s) => `<option value="${s.id}" ${s.id === state.uetSectorId ? 'selected' : ''}>${esc(s.nombre)}</option>`).join('')}
+                <select id="sel-uet-sector" ${state.uetId ? '' : 'disabled'}>
+                  <option value="">${state.uetId ? 'Seleccionar' : 'Elegí primero la UET'}</option>
+                  ${state.uetId ? renderSectorOptionsHtml(
+                    (catalogos.plantas.find((p) => p.id === state.plantaId)?.uet_sectores || []).filter((s) => s.uet_id === state.uetId),
+                    catalogos.plantas.find((p) => p.id === state.plantaId)?.uets.find((u) => u.id === state.uetId)?.grupos || [],
+                    state.uetSectorId
+                  ) : ''}
                 </select>
               </div>
             </div>
@@ -150,7 +172,7 @@ async function viewSeleccion() {
 
           <div class="new-record-row">
             <button class="new-record-btn" id="btn-nuevo">+ Nuevo registro</button>
-            <div class="hint" id="nuevo-hint">Elegí ${state.tipo === 'planta' ? 'planta y sector (la UET es opcional, ej. para Mantenimiento)' : 'un área y un sector'} para habilitar</div>
+            <div class="hint" id="nuevo-hint">Elegí ${state.tipo === 'planta' ? 'planta, UET y sector' : 'un área y un sector'} para habilitar</div>
           </div>
         </div>
       </div>
@@ -206,7 +228,9 @@ async function viewSeleccion() {
       document.getElementById('sel-planta').addEventListener('change', (e) => {
         state.plantaId = Number(e.target.value); state.uetId = null; state.uetSectorId = null; render();
       });
-      document.getElementById('sel-uet').addEventListener('change', (e) => { state.uetId = Number(e.target.value) || null; });
+      document.getElementById('sel-uet').addEventListener('change', (e) => {
+        state.uetId = Number(e.target.value) || null; state.uetSectorId = null; render();
+      });
       document.getElementById('sel-uet-sector').addEventListener('change', (e) => { state.uetSectorId = Number(e.target.value) || null; });
     } else {
       document.querySelectorAll('.area-card').forEach((card) => {
@@ -256,9 +280,10 @@ function renderHistRow(a, catalogos) {
 }
 
 async function crearRegistro(state) {
-  // La UET es opcional: Mantenimiento, por ejemplo, no tiene UET propia —
-  // solo se divide por planta y sector (Taller / Pañol-Depósito).
-  const faltaPlanta = state.tipo === 'planta' && (!state.plantaId || !state.uetSectorId);
+  // Todo sector productivo cuelga de una UET real (Matricería y
+  // Mantenimiento son UET también), así que planta + UET + sector son los
+  // tres obligatorios para una auditoría de tipo "planta".
+  const faltaPlanta = state.tipo === 'planta' && (!state.plantaId || !state.uetId || !state.uetSectorId);
   const faltaArea = state.tipo !== 'planta' && (!state.areaId || !state.sectorId);
   if (faltaPlanta || faltaArea) {
     toast('Completá la ubicación antes de crear el registro', 'error');
@@ -798,12 +823,14 @@ async function viewEvaluacion(auditId) {
 // ===========================================================================
 // Screen 4 · Dashboard
 // ===========================================================================
+const MES_LABEL = ['Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio', 'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'];
+
 async function viewDashboard() {
   setNav([{ label: 'Auditorías 5S', href: '/' }, { label: 'Dashboard', href: '/dashboard' }]);
   root.innerHTML = loadingHtml();
 
   const catalogos = await getCatalogos();
-  const state = { tipo: 'planta', plantaId: '', uetId: '', uetSectorId: '' };
+  const state = { tipo: 'planta', plantaId: '', uetId: '', uetSectorId: '', anio: 'todos', mes: 'todos' };
 
   async function render() {
     const dash = await api.dashboard({
@@ -811,15 +838,27 @@ async function viewDashboard() {
       ...(state.plantaId ? { planta_id: state.plantaId } : {}),
       ...(state.uetId ? { uet_id: state.uetId } : {}),
       ...(state.uetSectorId ? { uet_sector_id: state.uetSectorId } : {}),
+      ...(state.anio !== 'todos' ? { anio: state.anio } : {}),
+      ...(state.mes !== 'todos' ? { mes: state.mes } : {}),
     });
 
     const plantaSel = catalogos.plantas.find((p) => p.id === Number(state.plantaId));
+    const uetSel = plantaSel?.uets.find((u) => u.id === Number(state.uetId));
+    const sectoresDeUet = (plantaSel?.uet_sectores || []).filter((s) => s.uet_id === Number(state.uetId));
+
+    const segmentadorTxt = [
+      plantaSel?.nombre,
+      uetSel?.nombre,
+      sectoresDeUet.find((s) => s.id === Number(state.uetSectorId))?.nombre,
+      state.anio !== 'todos' ? state.anio : null,
+      state.mes !== 'todos' ? MES_LABEL[Number(state.mes) - 1] : null,
+    ].filter(Boolean).join(' · ') || 'todas las plantas, fechas y años';
 
     root.innerHTML = `
       <div class="card">
         <div class="card-head">
           <h2>Dashboard</h2>
-          <div class="sub">Radar, evolución y comparativo por sector</div>
+          <div class="sub">Radar, evolución y comparativo por sector, UET y planta</div>
           <a href="#/plan-accion" class="btn btn-secondary" style="text-decoration:none;">📋 Plan de Acción</a>
         </div>
         <div class="card-body">
@@ -840,51 +879,70 @@ async function viewDashboard() {
               </div>
               <div class="field">
                 <label>UET</label>
-                <select id="d-uet">
+                <select id="d-uet" ${plantaSel ? '' : 'disabled'}>
                   <option value="">Todas</option>
                   ${(plantaSel?.uets || []).map((u) => `<option value="${u.id}" ${String(u.id) === state.uetId ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('')}
                 </select>
               </div>
               <div class="field">
                 <label>Sector</label>
-                <select id="d-sector">
+                <select id="d-sector" ${state.uetId ? '' : 'disabled'}>
                   <option value="">Todos</option>
-                  ${(plantaSel?.uet_sectores || []).map((s) => `<option value="${s.id}" ${String(s.id) === state.uetSectorId ? 'selected' : ''}>${esc(s.nombre)}</option>`).join('')}
+                  ${state.uetId ? renderSectorOptionsHtml(sectoresDeUet, uetSel?.grupos || [], Number(state.uetSectorId) || null) : ''}
                 </select>
               </div>
             ` : ''}
+            <div class="field">
+              <label>Año</label>
+              <select id="d-anio">
+                <option value="todos" ${state.anio === 'todos' ? 'selected' : ''}>Todos</option>
+                ${(dash.anios_disponibles || []).map((a) => `<option value="${a}" ${String(a) === String(state.anio) ? 'selected' : ''}>${a}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Mes</label>
+              <select id="d-mes">
+                <option value="todos" ${state.mes === 'todos' ? 'selected' : ''}>Todos</option>
+                ${MES_LABEL.map((m, idx) => `<option value="${idx + 1}" ${String(idx + 1) === String(state.mes) ? 'selected' : ''}>${m}</option>`).join('')}
+              </select>
+            </div>
           </div>
 
           ${!dash.puntaje ? `
             <div class="dash-empty">
               <div class="ico">📊</div>
-              <div class="msg">Todavía no hay auditorías de tipo ${TIPO_LABEL[state.tipo]}</div>
+              <div class="msg">Todavía no hay auditorías de tipo ${TIPO_LABEL[state.tipo]} para ${esc(segmentadorTxt)}</div>
               <div class="sub">En cuanto se cargue la primera, este panel se completa solo.</div>
             </div>
           ` : `
             <div class="dash-grid">
               <div class="dash-card">
                 <h3>Radar 5S</h3>
-                <div class="cap">Última auditoría (${dash.puntaje.fecha}) · % por categoría</div>
+                <div class="cap">Promedio de ${dash.puntaje.n} auditoría${dash.puntaje.n === 1 ? '' : 's'} · % por categoría</div>
                 ${generateRadarSVG(dash.radar)}
               </div>
               <div class="dash-card">
                 <h3>Puntaje total</h3>
-                <div class="cap">Última auditoría vs. objetivo del mes</div>
+                <div class="cap">Promedio vs. objetivo del mes actual</div>
                 <div style="display:flex; align-items:baseline; gap:10px; margin-top:18px;">
-                  <div style="font-family:'Barlow Condensed'; font-weight:700; font-size:64px; color:var(--brand);">${dash.puntaje.actual}</div>
+                  <div style="font-family:'Barlow Condensed'; font-weight:700; font-size:64px; color:var(--brand);">${dash.puntaje.promedio.toFixed(1)}</div>
                   <div style="color:var(--ink-muted); font-size:15px;">/ 100</div>
                 </div>
-                ${dash.puntaje.objetivo_mes_actual !== null ? statusPill(dash.puntaje.actual, dash.puntaje.objetivo_mes_actual) : ''}
+                ${dash.puntaje.objetivo_mes_actual !== null ? statusPill(dash.puntaje.promedio, dash.puntaje.objetivo_mes_actual) : ''}
                 <div style="margin-top:22px; display:flex; flex-direction:column; gap:10px;">
-                  <div style="display:flex; justify-content:space-between; font-size:13px;"><span style="color:var(--ink-muted)">Puntaje anterior</span><b>${dash.puntaje.anterior ?? '—'}</b></div>
-                  <div style="display:flex; justify-content:space-between; font-size:13px;"><span style="color:var(--ink-muted)">Variación</span><b style="color:${(dash.puntaje.variacion || 0) >= 0 ? 'var(--good)' : 'var(--critical)'}">${dash.puntaje.variacion === null ? '—' : (dash.puntaje.variacion >= 0 ? '+' : '') + dash.puntaje.variacion}</b></div>
-                  <div style="display:flex; justify-content:space-between; font-size:13px;"><span style="color:var(--ink-muted)">Responsable</span><b>${esc(dash.puntaje.responsable || '—')}</b></div>
+                  <div style="display:flex; justify-content:space-between; font-size:13px;"><span style="color:var(--ink-muted)">Auditorías promediadas</span><b>${dash.puntaje.n}</b></div>
+                  <div style="display:flex; justify-content:space-between; font-size:13px;"><span style="color:var(--ink-muted)">Período</span><b>${dash.puntaje.desde === dash.puntaje.hasta ? dash.puntaje.desde : `${dash.puntaje.desde} → ${dash.puntaje.hasta}`}</b></div>
+                  ${dash.puntaje.ultima ? `
+                    <div style="border-top:1px solid var(--border); margin-top:4px; padding-top:10px; display:flex; flex-direction:column; gap:6px;">
+                      <div style="display:flex; justify-content:space-between; font-size:12.5px;"><span style="color:var(--ink-muted)">Última auditoría (${dash.puntaje.ultima.fecha})</span><b>${dash.puntaje.ultima.puntaje}</b></div>
+                      <div style="display:flex; justify-content:space-between; font-size:12.5px;"><span style="color:var(--ink-muted)">Responsable</span><b>${esc(dash.puntaje.ultima.responsable || '—')}</b></div>
+                    </div>
+                  ` : ''}
                 </div>
               </div>
               <div class="dash-card full">
                 <h3>Evolución — Objetivo vs. Auditado</h3>
-                <div class="cap">Año ${dash.anio}</div>
+                <div class="cap">Año ${dash.anio_evolucion}${state.anio === 'todos' ? ' (año más reciente con datos — elegí un año puntual para ver otro)' : ''}</div>
                 ${dash.evolucion.every((m) => m.objetivo === null) ? emptyStateHtml('📈', 'Sin objetivo mensual definido', 'Cargá los objetivos en monthly_targets para este tipo.') : generateEvolucionSVG(dash.evolucion)}
                 <div class="legend">
                   <span class="sw"><span class="ln" style="background:var(--brand);"></span> Auditado</span>
@@ -894,13 +952,23 @@ async function viewDashboard() {
               ${state.tipo === 'planta' ? `
                 <div class="dash-card full">
                   <h3>Comparativo por sector</h3>
-                  <div class="cap">Última auditoría de cada sector${dash.objetivo_mes_actual !== null ? ` vs. objetivo (${dash.objetivo_mes_actual})` : ''}</div>
+                  <div class="cap">Promedio de cada sector${dash.objetivo_mes_actual !== null ? ` vs. objetivo (${dash.objetivo_mes_actual})` : ''}</div>
                   ${dash.comparativo.length ? generateComparativoSVG(dash.comparativo, dash.objetivo_mes_actual) : emptyStateHtml('📊', 'Sin datos por sector todavía', '')}
                   <div class="legend">
                     <span class="sw"><span class="dot" style="background:var(--good);"></span> Cumple objetivo</span>
                     <span class="sw"><span class="dot" style="background:var(--warning);"></span> Cerca (dentro de 10 pts)</span>
                     <span class="sw"><span class="dot" style="background:var(--critical);"></span> Atención</span>
                   </div>
+                </div>
+                <div class="dash-card full">
+                  <h3>Comparativo por UET</h3>
+                  <div class="cap">Promedio de cada UET${dash.objetivo_mes_actual !== null ? ` vs. objetivo (${dash.objetivo_mes_actual})` : ''}</div>
+                  ${dash.comparativo_uet.length ? generateComparativoSVG(dash.comparativo_uet, dash.objetivo_mes_actual) : emptyStateHtml('📊', 'Sin datos por UET todavía', '')}
+                </div>
+                <div class="dash-card full">
+                  <h3>Comparativo por planta</h3>
+                  <div class="cap">Promedio de cada planta${dash.objetivo_mes_actual !== null ? ` vs. objetivo (${dash.objetivo_mes_actual})` : ''}</div>
+                  ${dash.comparativo_planta.length ? generateComparativoSVG(dash.comparativo_planta, dash.objetivo_mes_actual) : emptyStateHtml('📊', 'Sin datos por planta todavía', '')}
                 </div>
               ` : ''}
             </div>
@@ -915,9 +983,11 @@ async function viewDashboard() {
     const dPlanta = document.getElementById('d-planta');
     if (dPlanta) dPlanta.addEventListener('change', (e) => { state.plantaId = e.target.value; state.uetId = ''; state.uetSectorId = ''; render(); });
     const dUet = document.getElementById('d-uet');
-    if (dUet) dUet.addEventListener('change', (e) => { state.uetId = e.target.value; render(); });
+    if (dUet) dUet.addEventListener('change', (e) => { state.uetId = e.target.value; state.uetSectorId = ''; render(); });
     const dSector = document.getElementById('d-sector');
     if (dSector) dSector.addEventListener('change', (e) => { state.uetSectorId = e.target.value; render(); });
+    document.getElementById('d-anio').addEventListener('change', (e) => { state.anio = e.target.value; render(); });
+    document.getElementById('d-mes').addEventListener('change', (e) => { state.mes = e.target.value; render(); });
   }
 
   function statusPill(actual, objetivo) {

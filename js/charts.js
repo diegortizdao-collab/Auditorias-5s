@@ -110,12 +110,13 @@ export function generateComparativoSVG(comparativo, objetivo) {
 
   const bars = comparativo.map((row, i) => {
     const y = 8 + i * rowH;
-    const w = Math.max(row.puntaje * scale, 0);
-    const diff = objetivo !== null && objetivo !== undefined ? row.puntaje - objetivo : null;
+    const puntaje = Number(row.puntaje.toFixed(1));
+    const w = Math.max(puntaje * scale, 0);
+    const diff = objetivo !== null && objetivo !== undefined ? puntaje - objetivo : null;
     const color = diff === null ? 'var(--brand)' : diff >= 0 ? 'var(--good)' : diff >= -10 ? 'var(--warning)' : 'var(--critical)';
-    return `<text x="0" y="${y + 16}" font-size="12.5" fill="var(--ink)">${row.sector}</text>
+    return `<text x="0" y="${y + 16}" font-size="12.5" fill="var(--ink)">${row.label}</text>
       <rect x="${x0}" y="${y}" width="${w.toFixed(1)}" height="${barH}" rx="7" fill="${color}" fill-opacity="0.85"/>
-      <text x="${(x0 + w + 20).toFixed(1)}" y="${y + 24}" font-size="13" font-weight="700" fill="var(--ink)">${row.puntaje}</text>`;
+      <text x="${(x0 + w + 20).toFixed(1)}" y="${y + 24}" font-size="13" font-weight="700" fill="var(--ink)">${puntaje}</text>`;
   });
 
   return `<svg viewBox="0 0 640 ${viewH}" width="100%" height="${Math.min(viewH, 260)}">
