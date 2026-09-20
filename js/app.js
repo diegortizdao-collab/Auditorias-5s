@@ -166,7 +166,7 @@ async function viewSeleccion() {
         <div class="card-body" style="padding:0;">
           ${recientes.length ? `
             <table class="history-table">
-              <thead><tr><th>Fecha</th><th>Tipo</th><th>Ubicación</th><th>Puntaje</th><th>Estado</th></tr></thead>
+              <thead><tr><th>Fecha</th><th>Tipo</th><th>Ubicación</th><th>Puntaje</th><th>Estado</th><th></th></tr></thead>
               <tbody>
                 ${recientes.map((a) => renderHistRow(a, catalogos)).join('')}
               </tbody>
@@ -181,6 +181,20 @@ async function viewSeleccion() {
         const id = tr.dataset.id;
         const estado = tr.dataset.estado;
         window.location.hash = estado === 'cerrada' ? `#/auditoria/${id}/informe` : `#/auditoria/${id}/evaluacion`;
+      });
+    });
+
+    document.querySelectorAll('.btn-borrar-auditoria').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        const fecha = btn.dataset.fecha;
+        if (!window.confirm(`¿Borrar la auditoría del ${fecha}? Esta acción no se puede deshacer (se pierden sus puntajes, fotos y acciones asociadas).`)) return;
+        await safeRun(async () => {
+          await api.borrarAuditoria(id);
+          toast('Auditoría borrada');
+          viewSeleccion();
+        }, 'No se pudo borrar la auditoría');
       });
     });
 
@@ -237,6 +251,7 @@ function renderHistRow(a, catalogos) {
     <td>${esc(ubicacion)}</td>
     <td>${a.puntaje_total ?? '—'}${a.puntaje_objetivo ? ` / obj. ${a.puntaje_objetivo}` : ''}</td>
     <td>${estadoLbl}</td>
+    <td><button class="btn-icon btn-borrar-auditoria" data-id="${a.id}" data-fecha="${a.fecha}" title="Borrar esta auditoría">🗑</button></td>
   </tr>`;
 }
 
@@ -496,6 +511,11 @@ async function viewEvaluacion(auditId) {
   root.innerHTML = loadingHtml();
 
   const audit = await api.obtenerAuditoria(auditId);
+  // Qué ítems tienen desplegados los 4 criterios (0/1/3/5) — solo estado de
+  // pantalla, no se guarda en el servidor. Por defecto colapsado para no
+  // alargar la lista, pero el auditor puede abrirlo para ver qué distingue
+  // a cada puntaje antes de elegir uno.
+  const criteriosAbiertos = new Set();
 
   function subtotal(cat) {
     return cat.items.reduce((s, it) => s + (it.score ?? 0), 0);
@@ -540,6 +560,15 @@ async function viewEvaluacion(auditId) {
         </div>
       </div>
     `;
+
+    document.querySelectorAll('.toggle-criterios').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const itemId = Number(btn.dataset.item);
+        if (criteriosAbiertos.has(itemId)) criteriosAbiertos.delete(itemId);
+        else criteriosAbiertos.add(itemId);
+        render();
+      });
+    });
 
     document.querySelectorAll('.scale button').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -723,17 +752,38 @@ async function viewEvaluacion(auditId) {
     `;
   }
 
+  function renderCriteriosBlock(item) {
+    if (!criteriosAbiertos.has(item.rubric_item_id)) return '';
+    const filas = [
+      [0, item.criterio_0], [1, item.criterio_1], [3, item.criterio_3], [5, item.criterio_5],
+    ];
+    return `
+      <div class="criterios-block" style="grid-column:1/-1;">
+        ${filas.map(([s, texto]) => `
+          <div class="criterio-fila ${item.score === s ? 'sel' : ''}">
+            <span class="criterio-score">${s}</span>
+            <span class="criterio-texto">${esc(texto || '(sin descripción)')}</span>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
   function renderItemRow(item) {
     const fotos = item.fotos || [];
+    const abierto = criteriosAbiertos.has(item.rubric_item_id);
     return `
       <div class="item-row">
-        <div class="item-name">${esc(item.nombre)}
+        <div class="item-name">
+          <button class="btn-icon toggle-criterios" data-item="${item.rubric_item_id}" title="${abierto ? 'Ocultar' : 'Ver'} qué distingue a cada puntaje">${abierto ? '▾' : 'ℹ'}</button>
+          ${esc(item.nombre)}
           <textarea class="item-comentario" data-item="${item.rubric_item_id}" placeholder="Comentario (opcional)" rows="1">${esc(item.comentario || '')}</textarea>
         </div>
         <div class="scale">
           ${SCORES.map((s) => `<button data-item="${item.rubric_item_id}" data-score="${s}" class="${item.score === s ? 'sel' : ''}">${s}</button>`).join('')}
         </div>
         <label class="photo-chip">📷 foto<input type="file" accept="image/*" capture="environment" data-item="${item.rubric_item_id}"></label>
+        ${renderCriteriosBlock(item)}
         ${fotos.length ? `<div class="photo-thumb-row" style="grid-column:1/-1;">
           ${fotos.map((f) => `<div class="photo-thumb"><img src="${api.urlFoto(f.url)}" alt=""><button class="rm" data-foto="${f.id}" data-item="${item.rubric_item_id}">×</button></div>`).join('')}
         </div>` : ''}
@@ -1125,7 +1175,10 @@ async function viewInforme(auditId) {
         <h3 style="margin-top:24px;">Hoja 3 · Plan de Acción</h3>
         ${tablaAcciones()}
 
-        <button class="download-btn" id="btn-descargar">⭳ Descargar .xlsx</button>
+        <div class="informe-acciones">
+          <button class="download-btn" id="btn-descargar">⭳ Descargar .xlsx</button>
+          <button class="email-btn" id="btn-enviar-correo">✉ Enviar por correo</button>
+        </div>
       </div>
     </div>
   `;
@@ -1143,7 +1196,45 @@ async function viewInforme(auditId) {
     });
   });
 
-  document.getElementById('btn-descargar').addEventListener('click', () => safeRun(() => descargarInforme(audit), 'No se pudo generar el .xlsx'));
+  document.getElementById('btn-descargar').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Generando… (incrusta las fotos, puede tardar unos segundos)';
+    try {
+      await safeRun(() => descargarInforme(audit), 'No se pudo generar el .xlsx');
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
+
+  document.getElementById('btn-enviar-correo').addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const original = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Generando…';
+    try {
+      await safeRun(() => descargarInforme(audit), 'No se pudo generar el .xlsx');
+
+      const sector = audit.uet_sector_nombre || audit.sector_nombre || '—';
+      const hasPuntaje = audit.categorias.some((c) => c.items.some((it) => it.score !== null && it.score !== undefined));
+      const puntaje = hasPuntaje ? `${audit.puntaje_total} / ${audit.puntaje_objetivo ?? '—'}` : 'sin puntaje aún';
+
+      const asunto = `Informe 5S - ${sector} - ${audit.fecha}`;
+      const cuerpo =
+        `Adjunto el informe de la Auditoría 5S del sector ${sector}, ` +
+        `del día ${audit.fecha}. Puntaje: ${puntaje}.\n\n` +
+        `⚠ Recordá adjuntar el archivo .xlsx que se acaba de descargar — ` +
+        `este mail no lo adjunta automáticamente.`;
+
+      const mailtoUrl = `mailto:?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(cuerpo)}`;
+      window.location.href = mailtoUrl;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = original;
+    }
+  });
 }
 
 router();

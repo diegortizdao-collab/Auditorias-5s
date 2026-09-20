@@ -4,6 +4,8 @@
 // Prototipo verificado en Node antes de portarlo a este módulo de browser
 // (mismos merges / colores / rotación de texto, confirmados con openpyxl).
 
+import { api } from './api.js';
+
 const COLOR = {
   headerDark: 'FF20313E',
   brandSoft: 'FFBFE1F2',
@@ -33,7 +35,7 @@ const TITLES = {
 const ESTADO_LABEL = { abierta: 'Abierta', en_proceso: 'En proceso', cerrada: 'Cerrada' };
 const ORIGEN_LABEL = { ia: 'IA', manual: 'Manual' };
 
-export function buildInformeWorkbook(audit) {
+export async function buildInformeWorkbook(audit) {
   const wb = new window.ExcelJS.Workbook();
   const ws = wb.addWorksheet('Hoja 1', { views: [{ showGridLines: false }] });
   ws.columns = [
@@ -184,12 +186,107 @@ export function buildInformeWorkbook(audit) {
   for (let c = 1; c <= 7; c++) ws.getCell(r, c).border = BORDER_ALL;
   ws.getRow(r).height = 30;
 
+  await buildFotosSheet(wb, audit);
   buildPlanAccionSheet(wb, audit);
 
   return wb;
 }
 
-// Hoja 2 — Plan de Acción: las acciones (sugeridas por IA + manuales) que
+// Convierte cualquier foto (jpg/png/webp, lo que haya devuelto la cámara o
+// el picker) a un PNG en base64 dibujándola en un <canvas> — así no depende
+// de qué formatos soporte ExcelJS.addImage (solo jpeg/png/gif) y de paso
+// devuelve el tamaño real para no deformarla al insertarla.
+function blobAPngBase64(blob) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob);
+    const img = new Image();
+    img.onload = () => {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.naturalWidth || 1;
+      canvas.height = img.naturalHeight || 1;
+      canvas.getContext('2d').drawImage(img, 0, 0);
+      URL.revokeObjectURL(url);
+      resolve({ base64: canvas.toDataURL('image/png').split(',')[1], width: canvas.width, height: canvas.height });
+    };
+    img.onerror = (e) => { URL.revokeObjectURL(url); reject(e); };
+    img.src = url;
+  });
+}
+
+// Hoja 2 — Fotos: una fila por foto cargada, con la imagen incrustada de
+// verdad (no un link) junto al ítem al que corresponde. Si una foto puntual
+// no se puede descargar o decodificar, esa fila queda con un aviso en vez
+// de romper la generación del resto del informe.
+async function buildFotosSheet(wb, audit) {
+  const fotos = (audit.categorias || []).flatMap((cat) =>
+    cat.items.flatMap((item) => (item.fotos || []).map((f) => ({ ...f, item_nombre: item.nombre, cat_tag: cat.tag })))
+  );
+
+  const ws = wb.addWorksheet('Fotos', { views: [{ showGridLines: false }] });
+  ws.columns = [{ width: 6 }, { width: 30 }, { width: 34 }];
+
+  let r = 1;
+  ws.mergeCells(r, 1, r, 3);
+  const banner = ws.getCell(r, 1);
+  banner.value = 'FOTOS DE LA AUDITORÍA';
+  banner.fill = fillColor(COLOR.headerDark);
+  banner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
+  banner.alignment = { horizontal: 'center', vertical: 'middle' };
+  ws.getRow(r).height = 22;
+  r++;
+
+  if (!fotos.length) {
+    ws.mergeCells(r, 1, r, 3);
+    const cell = ws.getCell(r, 1);
+    cell.value = 'Esta auditoría no tiene fotos cargadas.';
+    cell.font = { italic: true, color: { argb: 'FF57707F' } };
+    cell.alignment = { vertical: 'middle' };
+    for (let c = 1; c <= 3; c++) ws.getCell(r, c).border = BORDER_ALL;
+    return;
+  }
+
+  ['"S"', 'ÍTEM', 'FOTO'].forEach((label, idx) => {
+    const cell = ws.getCell(r, idx + 1);
+    cell.value = label;
+    cell.fill = fillColor(COLOR.fieldLabelBg);
+    cell.font = { bold: true, size: 9 };
+    cell.alignment = { horizontal: 'center', vertical: 'middle' };
+    cell.border = BORDER_ALL;
+  });
+  r++;
+
+  const MAX_W = 210;
+  const MAX_H = 150;
+
+  for (const f of fotos) {
+    ws.getCell(r, 1).value = f.cat_tag || '';
+    ws.getCell(r, 1).alignment = { horizontal: 'center', vertical: 'middle' };
+    ws.getCell(r, 2).value = f.item_nombre || '';
+    ws.getCell(r, 2).font = { bold: true, size: 10 };
+    ws.getCell(r, 2).alignment = { wrapText: true, vertical: 'middle' };
+    for (let c = 1; c <= 3; c++) ws.getCell(r, c).border = BORDER_ALL;
+
+    try {
+      const res = await fetch(api.urlFoto(f.url));
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const blob = await res.blob();
+      const { base64, width, height } = await blobAPngBase64(blob);
+      const scale = Math.min(MAX_W / width, MAX_H / height, 1);
+      const w = Math.round(width * scale);
+      const h = Math.round(height * scale);
+      const imageId = wb.addImage({ base64: `data:image/png;base64,${base64}`, extension: 'png' });
+      ws.addImage(imageId, { tl: { col: 2, row: r - 1 }, ext: { width: w, height: h } });
+      ws.getRow(r).height = Math.max(h * 0.78, 30); // px -> pt aproximado
+    } catch (err) {
+      ws.getCell(r, 3).value = 'No se pudo incrustar esta foto — se puede ver desde la app.';
+      ws.getCell(r, 3).font = { italic: true, size: 9, color: { argb: 'FF57707F' } };
+      ws.getCell(r, 3).alignment = { wrapText: true, vertical: 'middle' };
+    }
+    r++;
+  }
+}
+
+// Hoja 3 — Plan de Acción: las acciones (sugeridas por IA + manuales) que
 // dejó esta auditoría, item por item. Es la salida directa del plan de
 // acción para poder imprimirla o llevarla al seguimiento.
 function buildPlanAccionSheet(wb, audit) {
@@ -257,7 +354,7 @@ function buildPlanAccionSheet(wb, audit) {
 }
 
 export async function descargarInforme(audit) {
-  const wb = buildInformeWorkbook(audit);
+  const wb = await buildInformeWorkbook(audit);
   const buffer = await wb.xlsx.writeBuffer();
   const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
   const url = URL.createObjectURL(blob);

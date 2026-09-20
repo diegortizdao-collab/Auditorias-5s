@@ -43,8 +43,11 @@ que el CORS deje pasar los pedidos del frontend ya publicado.
   datos reales (misma geometría que el preview de diseño, ahora calculada
   dinámicamente).
 - `js/xlsx-export.js` — genera el Informe en `.xlsx`: Hoja 1 (réplica exacta
-  de la solapa "8. Auditoría 5S y KPI") + hoja "Plan de Accion" con las
-  acciones de esa auditoría, usando ExcelJS (cargado por CDN).
+  de la solapa "8. Auditoría 5S y KPI") + hoja "Fotos" (cada foto cargada,
+  incrustada de verdad, no como link — se descarga de R2 y se normaliza a
+  PNG con un `<canvas>` antes de insertarla, así no importa si la cámara la
+  guardó en jpg/png/webp) + hoja "Plan de Accion" con las acciones de esa
+  auditoría, usando ExcelJS (cargado por CDN).
 - `assets/` — logos de Escorial y SPE.
 
 ## Cómo se usa
@@ -68,17 +71,30 @@ que el CORS deje pasar los pedidos del frontend ya publicado.
    quiere volver a mirar.
 4. **Evaluación** — puntuás cada ítem (0/1/3/5), con comentario y foto
    opcionales. El puntaje se guarda al toque, no hace falta "guardar todo"
-   al final. Si un ítem queda en **0 o 1**, la IA (Cloudflare Workers AI)
-   sugiere automáticamente una acción correctiva para ese ítem — se muestra
-   ahí mismo, debajo del ítem, con un botón "↻" para pedirle otra sugerencia
-   si no convence. También se puede agregar a mano cualquier cantidad de
-   acciones manuales sobre un ítem ("+ Agregar acción manual"), con
-   responsable y fecha de vencimiento opcionales.
+   al final. Al lado del nombre de cada ítem hay un ícono "ℹ" que despliega
+   los 4 criterios (qué distingue a un 0 de un 1, un 3 o un 5) — colapsado
+   por defecto para no alargar la pantalla, pero pensado para que alguien
+   que recién arranca con la app pueda consultarlo antes de elegir un
+   puntaje en vez de puntuar a ciegas; una vez puntuado, el criterio elegido
+   queda resaltado ahí mismo. Si un ítem queda en **0 o 1**, la IA
+   (Cloudflare Workers AI) sugiere automáticamente una acción correctiva
+   para ese ítem — se muestra ahí mismo, debajo del ítem, con un botón "↻"
+   para pedirle otra sugerencia si no convence. También se puede agregar a
+   mano cualquier cantidad de acciones manuales sobre un ítem ("+ Agregar
+   acción manual"), con responsable y fecha de vencimiento opcionales.
 5. **Informe** — al finalizar, se genera automáticamente la Hoja 1 (idéntica
    al Excel que exige la norma) más una **Hoja 3 · Plan de Acción** con
    todas las acciones que dejó esa auditoría (editable ahí mismo, con el
    mismo selector de estado), y se puede descargar todo en `.xlsx`
-   (2 hojas: "Hoja 1" y "Plan de Accion").
+   (3 hojas: "Hoja 1", "Fotos" —con las fotos realmente incrustadas, no un
+   link— y "Plan de Accion"). Al lado del botón de descarga hay un botón
+   **"✉ Enviar por correo"**: descarga el mismo `.xlsx` y, en el mismo click,
+   abre el cliente de correo predeterminado del usuario (Outlook u otro) con
+   un borrador prellenado (sector, fecha y puntaje) y un recordatorio de
+   adjuntar el archivo recién descargado. No hay envío automático ni
+   servidor de correo de por medio — por eso no requiere dominio propio ni
+   configuración adicional; el usuario decide si finalmente lo manda, y
+   puede editar el borrador o cancelarlo antes de enviar.
 6. **Dashboard** — radar, evolución vs. objetivo mensual y comparativo por
    sector, filtrable por tipo / planta / UET / sector.
 7. **Plan de Acción** — pantalla independiente de la Evaluación (accesible

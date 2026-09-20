@@ -30,6 +30,7 @@ export const api = {
   crearAuditoria: (body) => request('/auditorias', { method: 'POST', body: JSON.stringify(body) }),
   obtenerAuditoria: (id) => request(`/auditorias/${id}`),
   actualizarAuditoria: (id, body) => request(`/auditorias/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+  borrarAuditoria: (id) => request(`/auditorias/${id}`, { method: 'DELETE' }),
 
   guardarPuntaje: (auditId, itemId, body) =>
     request(`/auditorias/${auditId}/puntajes/${itemId}`, { method: 'PUT', body: JSON.stringify(body) }),
