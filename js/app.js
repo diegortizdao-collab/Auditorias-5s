@@ -7,6 +7,7 @@ const root = document.getElementById('view-root');
 const nav = document.getElementById('app-nav');
 
 const TIPO_LABEL = { planta: 'Planta', panol: 'Pañol', oficina: 'Oficina' };
+const AUDIT_ESTADO_LABEL = { en_progreso: 'En progreso', cerrada: 'Cerrada' };
 const SCORES = [0, 1, 3, 5];
 
 let catalogosCache = null;
@@ -89,6 +90,7 @@ async function router() {
   try {
     if (parts.length === 0) return viewSeleccion();
     if (parts[0] === 'dashboard') return viewDashboard();
+    if (parts[0] === 'historial') return viewHistorial(routeParams);
     if (parts[0] === 'plan-accion') return viewPlanAccion(routeParams);
     if (parts[0] === 'auditoria' && parts[2] === 'revision') return viewRevision(parts[1]);
     if (parts[0] === 'auditoria' && parts[2] === 'formulario') return viewFormulario(parts[1]);
@@ -179,8 +181,12 @@ async function viewSeleccion() {
 
       <div class="card">
         <div class="card-head">
-          <h2>Auditorías recientes</h2>
+          <div>
+            <h2>Auditorías recientes</h2>
+            <div class="sub">Últimas 10 — para ver todas, con filtros, abrí el historial completo</div>
+          </div>
           <div class="btn-row">
+            <a href="#/historial" class="btn btn-secondary" style="text-decoration:none;">🗓 Historial completo</a>
             <a href="#/plan-accion" class="btn btn-secondary" style="text-decoration:none;">📋 Plan de Acción</a>
             <a href="#/dashboard" class="btn btn-secondary" style="text-decoration:none;">Ver Dashboard →</a>
           </div>
@@ -277,6 +283,184 @@ function renderHistRow(a, catalogos) {
     <td>${estadoLbl}</td>
     <td><button class="btn-icon btn-borrar-auditoria" data-id="${a.id}" data-fecha="${a.fecha}" title="Borrar esta auditoría">🗑</button></td>
   </tr>`;
+}
+
+// ===========================================================================
+// Historial completo — todas las auditorías, con filtros (no solo las
+// últimas 10 que se ven en Selección)
+// ===========================================================================
+async function viewHistorial(routeParams) {
+  setNav([{ label: 'Auditorías 5S', href: '/' }, { label: 'Historial', href: '/historial' }]);
+  root.innerHTML = loadingHtml();
+
+  const catalogos = await getCatalogos();
+  const state = {
+    tipo: routeParams.get('tipo') || '',
+    estado: routeParams.get('estado') || '',
+    plantaId: routeParams.get('planta_id') || '',
+    uetId: routeParams.get('uet_id') || '',
+    uetSectorId: routeParams.get('uet_sector_id') || '',
+    areaId: routeParams.get('area_id') || '',
+    sectorId: routeParams.get('sector_id') || '',
+    desde: routeParams.get('desde') || '',
+    hasta: routeParams.get('hasta') || '',
+  };
+
+  async function render() {
+    const params = {
+      limit: '500',
+      ...(state.tipo ? { audit_type: state.tipo } : {}),
+      ...(state.estado ? { estado: state.estado } : {}),
+      ...(state.plantaId ? { planta_id: state.plantaId } : {}),
+      ...(state.uetId ? { uet_id: state.uetId } : {}),
+      ...(state.uetSectorId ? { uet_sector_id: state.uetSectorId } : {}),
+      ...(state.areaId ? { area_id: state.areaId } : {}),
+      ...(state.sectorId ? { sector_id: state.sectorId } : {}),
+      ...(state.desde ? { desde: state.desde } : {}),
+      ...(state.hasta ? { hasta: state.hasta } : {}),
+    };
+    const lista = await api.listarAuditorias(params);
+    const plantaSel = catalogos.plantas.find((p) => String(p.id) === state.plantaId);
+    const uetSel = plantaSel?.uets.find((u) => String(u.id) === state.uetId);
+    const areaSel = catalogos.areas.find((ar) => String(ar.id) === state.areaId);
+
+    root.innerHTML = `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>Historial de auditorías</h2>
+            <div class="sub">Todas las auditorías cargadas, con filtros</div>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="plan-filters">
+            <div class="field">
+              <label>Tipo</label>
+              <select id="hf-tipo">
+                <option value="">Todos</option>
+                ${['planta', 'panol', 'oficina'].map((t) => `<option value="${t}" ${state.tipo === t ? 'selected' : ''}>${TIPO_LABEL[t]}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Estado</label>
+              <select id="hf-estado">
+                <option value="">Todos</option>
+                ${Object.entries(AUDIT_ESTADO_LABEL).map(([v, l]) => `<option value="${v}" ${state.estado === v ? 'selected' : ''}>${l}</option>`).join('')}
+              </select>
+            </div>
+            ${state.tipo === 'planta' ? `
+              <div class="field">
+                <label>Planta</label>
+                <select id="hf-planta">
+                  <option value="">Todas</option>
+                  ${catalogos.plantas.map((p) => `<option value="${p.id}" ${state.plantaId === String(p.id) ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="field">
+                <label>UET</label>
+                <select id="hf-uet" ${state.plantaId ? '' : 'disabled'}>
+                  <option value="">${state.plantaId ? 'Todas' : 'Elegí primero la planta'}</option>
+                  ${(plantaSel?.uets || []).map((u) => `<option value="${u.id}" ${state.uetId === String(u.id) ? 'selected' : ''}>${esc(u.nombre)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="field">
+                <label>Sector</label>
+                <select id="hf-sector" ${state.uetId ? '' : 'disabled'}>
+                  <option value="">${state.uetId ? 'Todos' : 'Elegí primero la UET'}</option>
+                  ${state.uetId ? renderSectorOptionsHtml(
+                    (plantaSel?.uet_sectores || []).filter((s) => s.uet_id === Number(state.uetId)),
+                    uetSel?.grupos || [],
+                    state.uetSectorId ? Number(state.uetSectorId) : null
+                  ) : ''}
+                </select>
+              </div>
+            ` : ''}
+            ${(state.tipo === 'panol' || state.tipo === 'oficina') ? `
+              <div class="field">
+                <label>Área</label>
+                <select id="hf-area">
+                  <option value="">Todas</option>
+                  ${catalogos.areas.map((ar) => `<option value="${ar.id}" ${state.areaId === String(ar.id) ? 'selected' : ''}>${esc(ar.nombre)}</option>`).join('')}
+                </select>
+              </div>
+              <div class="field">
+                <label>Sector</label>
+                <select id="hf-area-sector" ${state.areaId ? '' : 'disabled'}>
+                  <option value="">${state.areaId ? 'Todos' : 'Elegí primero el área'}</option>
+                  ${(areaSel?.sectores || []).map((s) => `<option value="${s.id}" ${state.sectorId === String(s.id) ? 'selected' : ''}>${esc(s.nombre)}</option>`).join('')}
+                </select>
+              </div>
+            ` : ''}
+            <div class="field">
+              <label>Desde</label>
+              <input type="date" id="hf-desde" value="${state.desde}">
+            </div>
+            <div class="field">
+              <label>Hasta</label>
+              <input type="date" id="hf-hasta" value="${state.hasta}">
+            </div>
+          </div>
+
+          <div class="plan-count">
+            ${lista.length} ${lista.length === 1 ? 'auditoría' : 'auditorías'}${lista.length === 500 ? ' — hay más; acotá por fecha u otro filtro para ver el resto' : ''}
+          </div>
+
+          ${lista.length ? `
+            <div style="overflow-x:auto;">
+              <table class="history-table">
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Ubicación</th><th>Puntaje</th><th>Estado</th><th></th></tr></thead>
+                <tbody>
+                  ${lista.map((a) => renderHistRow(a, catalogos)).join('')}
+                </tbody>
+              </table>
+            </div>
+          ` : emptyStateHtml('📋', 'No hay auditorías con estos filtros', 'Probá ampliando el rango de fechas o sacando algún filtro.')}
+        </div>
+      </div>
+    `;
+
+    document.querySelectorAll('.history-table tr[data-id]').forEach((tr) => {
+      tr.addEventListener('click', () => {
+        const id = tr.dataset.id;
+        const estado = tr.dataset.estado;
+        window.location.hash = estado === 'cerrada' ? `#/auditoria/${id}/informe` : `#/auditoria/${id}/evaluacion`;
+      });
+    });
+    document.querySelectorAll('.btn-borrar-auditoria').forEach((btn) => {
+      btn.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        const id = Number(btn.dataset.id);
+        const fecha = btn.dataset.fecha;
+        if (!window.confirm(`¿Borrar la auditoría del ${fecha}? Esta acción no se puede deshacer (se pierden sus puntajes, fotos y acciones asociadas).`)) return;
+        await safeRun(async () => {
+          await api.borrarAuditoria(id);
+          toast('Auditoría borrada');
+          render();
+        }, 'No se pudo borrar la auditoría');
+      });
+    });
+
+    document.getElementById('hf-tipo').addEventListener('change', (e) => {
+      state.tipo = e.target.value;
+      state.plantaId = ''; state.uetId = ''; state.uetSectorId = ''; state.areaId = ''; state.sectorId = '';
+      render();
+    });
+    document.getElementById('hf-estado').addEventListener('change', (e) => { state.estado = e.target.value; render(); });
+    const hfPlanta = document.getElementById('hf-planta');
+    if (hfPlanta) hfPlanta.addEventListener('change', (e) => { state.plantaId = e.target.value; state.uetId = ''; state.uetSectorId = ''; render(); });
+    const hfUet = document.getElementById('hf-uet');
+    if (hfUet) hfUet.addEventListener('change', (e) => { state.uetId = e.target.value; state.uetSectorId = ''; render(); });
+    const hfSector = document.getElementById('hf-sector');
+    if (hfSector) hfSector.addEventListener('change', (e) => { state.uetSectorId = e.target.value; render(); });
+    const hfArea = document.getElementById('hf-area');
+    if (hfArea) hfArea.addEventListener('change', (e) => { state.areaId = e.target.value; state.sectorId = ''; render(); });
+    const hfAreaSector = document.getElementById('hf-area-sector');
+    if (hfAreaSector) hfAreaSector.addEventListener('change', (e) => { state.sectorId = e.target.value; render(); });
+    document.getElementById('hf-desde').addEventListener('change', (e) => { state.desde = e.target.value; render(); });
+    document.getElementById('hf-hasta').addEventListener('change', (e) => { state.hasta = e.target.value; render(); });
+  }
+
+  await render();
 }
 
 async function crearRegistro(state) {

@@ -38,7 +38,7 @@ que el CORS deje pasar los pedidos del frontend ya publicado.
 - `js/config.js` — URL de la API.
 - `js/api.js` — wrapper de `fetch` para cada endpoint.
 - `js/app.js` — router (hash) + las pantallas (Selección, Formulario,
-  Evaluación, Dashboard, Informe, Plan de Acción).
+  Evaluación, Dashboard, Informe, Plan de Acción, Historial).
 - `js/charts.js` — genera los SVG de radar / evolución / comparativo con
   datos reales (misma geometría que el preview de diseño, ahora calculada
   dinámicamente).
@@ -113,6 +113,14 @@ que el CORS deje pasar los pedidos del frontend ya publicado.
    con su origen (🤖 IA / ✋ Manual). Se filtra por estado (abierta / en
    proceso / cerrada), tipo, planta y sector, y el estado de cada acción se
    puede cambiar ahí mismo, sin entrar a la auditoría.
+8. **Historial** — la tabla de "Auditorías recientes" en Selección muestra
+   solo las últimas 10 (para que esa pantalla cargue rápido); un link
+   "🗓 Historial completo" lleva a `#/historial`, que trae **todas** las
+   auditorías cargadas (sin tope, hasta el máximo de 500 que admite la API
+   por consulta) con los mismos filtros que Plan de Acción: tipo, estado,
+   y en cascada real Planta → UET → Sector (o Área → Sector para Pañol /
+   Oficina), más rango de fechas (Desde / Hasta). Reutiliza el mismo
+   `GET /auditorias` de siempre — no hubo que tocar la API.
 
 Sin login (v1): cualquiera con el link puede cargar y ver auditorías.
 
