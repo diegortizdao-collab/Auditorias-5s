@@ -561,3 +561,14 @@
     .accion-form{ grid-template-columns:1fr; }
     .plan-table{ display:block; overflow-x:auto; }
   }
+
+  /* Vista de impresión del navegador — usada por el botón "🖨 Imprimir
+     indicadores" de la pantalla de Competencia (ver app.js viewCompetencia).
+     Oculta nav/footer/filtros/botones y muestra el título fijo del período
+     impreso (.print-title, display:none por defecto, visible solo acá). */
+  @media print{
+    .app-nav, footer, .no-print{ display:none !important; }
+    body{ background:#fff; }
+    .card{ box-shadow:none !important; border:none !important; }
+    .print-title{ display:block !important; }
+  }

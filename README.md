@@ -59,7 +59,9 @@ que el CORS deje pasar los pedidos del frontend ya publicado.
    esa UET (agrupados en subgrupos como "Soldadura" o "Pintura" cuando la
    UET los tiene). Si ese sector ya tiene acciones correctivas pendientes de
    una auditoría anterior, se pasa directo a **Revisión** en vez de al
-   Formulario.
+   Formulario. Además de elegir el tipo, hay un toggle **Modalidad**:
+   "Auditoría normal" (como se describe arriba) o **"🏆 Competencia"** — ver
+   punto 9 más abajo.
 2. **Revisión de Plan de Acción** *(solo aparece si hay algo pendiente de la
    vez pasada en ese mismo sector)* — se listan las acciones abiertas /
    en proceso de auditorías anteriores, agrupadas por ítem. Por cada una se
@@ -121,6 +123,24 @@ que el CORS deje pasar los pedidos del frontend ya publicado.
    y en cascada real Planta → UET → Sector (o Área → Sector para Pañol /
    Oficina), más rango de fechas (Desde / Hasta). Reutiliza el mismo
    `GET /auditorias` de siempre — no hubo que tocar la API.
+
+9. **Competencia anual** — competencia anual entre sectores y subsectores de
+   la planta (unas 3 auditorías por año). Se elige en Selección con el
+   toggle "🏆 Competencia": usa la misma rúbrica/puntaje que una auditoría
+   normal del mismo tipo, pero **todo el encabezado de ubicación se completa
+   a mano** (Planta, UET, Sector y Subsector, como texto libre) porque la
+   competencia incluye subsectores que el catálogo general no tiene
+   cargados. Una auditoría de competencia queda totalmente **aparte de lo
+   habitual**: no aparece en "Auditorías recientes", Historial, Plan de
+   Acción ni en el promedio del Dashboard — tiene su propia pantalla,
+   **"🏆 Indicadores de Competencia"** (accesible desde Selección y desde el
+   Dashboard), con un segmentador de tipo / año / subsector, el radar 5S y un
+   comparativo de barras por subsector. El botón **"🖨 Imprimir
+   indicadores"** usa la vista de impresión del navegador (`window.print()`)
+   para imprimir esos dos gráficos con un título fijo del período elegido,
+   ocultando el resto de la interfaz. El Informe de cada auditoría de
+   competencia es el mismo de siempre, mostrando la ubicación cargada a mano
+   en los campos PLANTA / SECTOR.
 
 Sin login (v1): cualquiera con el link puede cargar y ver auditorías.
 

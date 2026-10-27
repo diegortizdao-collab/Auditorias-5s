@@ -48,6 +48,11 @@ export const api = {
     return request(`/dashboard${qs ? `?${qs}` : ''}`);
   },
 
+  competencia: (params = {}) => {
+    const qs = new URLSearchParams(params).toString();
+    return request(`/competencia${qs ? `?${qs}` : ''}`);
+  },
+
   listarPlanAccion: (params = {}) => {
     const qs = new URLSearchParams(params).toString();
     return request(`/plan-accion${qs ? `?${qs}` : ''}`);

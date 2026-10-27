@@ -45,15 +45,22 @@ export async function buildInformeWorkbook(audit) {
   let r = 1;
   ws.mergeCells(r, 1, r, 7);
   const banner = ws.getCell(r, 1);
-  banner.value = TITLES[audit.audit_type] || 'AUDITORÍA 5S';
+  banner.value = (TITLES[audit.audit_type] || 'AUDITORÍA 5S') + (audit.es_competencia ? ' — COMPETENCIA' : '');
   banner.fill = fillColor(COLOR.headerDark);
   banner.font = { bold: true, size: 14, color: { argb: 'FFFFFFFF' } };
   banner.alignment = { horizontal: 'center', vertical: 'middle' };
   ws.getRow(r).height = 22;
   r++;
 
-  const sectorNombre = audit.uet_sector_nombre || audit.sector_nombre || '';
-  const plantaNombre = audit.planta_nombre || audit.area_nombre || '';
+  // Competencia: el encabezado se completó a mano (comp_*), no viene del
+  // catálogo — se arma "Planta · UET" y "Sector · Subsector" para no perder
+  // el subsector en la réplica exacta de la Hoja 1 (que no tiene fila propia).
+  const sectorNombre = audit.es_competencia
+    ? [audit.comp_sector, audit.comp_subsector].filter(Boolean).join(' · ')
+    : (audit.uet_sector_nombre || audit.sector_nombre || '');
+  const plantaNombre = audit.es_competencia
+    ? [audit.comp_planta, audit.comp_uet].filter(Boolean).join(' · ')
+    : (audit.planta_nombre || audit.area_nombre || '');
 
   const fieldRows = [
     ['FECHA', audit.fecha, 'EVALUADOR', audit.evaluador],

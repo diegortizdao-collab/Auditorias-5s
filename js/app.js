@@ -90,6 +90,7 @@ async function router() {
   try {
     if (parts.length === 0) return viewSeleccion();
     if (parts[0] === 'dashboard') return viewDashboard();
+    if (parts[0] === 'competencia') return viewCompetencia(routeParams);
     if (parts[0] === 'historial') return viewHistorial(routeParams);
     if (parts[0] === 'plan-accion') return viewPlanAccion(routeParams);
     if (parts[0] === 'auditoria' && parts[2] === 'revision') return viewRevision(parts[1]);
@@ -113,7 +114,12 @@ async function viewSeleccion() {
 
   const [catalogos, recientes] = await Promise.all([getCatalogos(), api.listarAuditorias({ limit: '10' })]);
 
-  const state = { tipo: 'planta', areaId: null, sectorId: null, plantaId: null, uetId: null, uetSectorId: null };
+  const state = {
+    tipo: 'planta', areaId: null, sectorId: null, plantaId: null, uetId: null, uetSectorId: null,
+    // Competencia anual: mismo puntaje/rúbrica, pero el encabezado de
+    // ubicación se completa a mano (incluye subsectores fuera del catálogo).
+    esCompetencia: false, compPlanta: '', compUet: '', compSector: '', compSubsector: '',
+  };
   const plantaSuipacha = catalogos.plantas.find((p) => p.nombre === 'Suipacha') || catalogos.plantas[0];
   if (plantaSuipacha) state.plantaId = plantaSuipacha.id;
 
@@ -132,7 +138,25 @@ async function viewSeleccion() {
             </div>
           </div>
 
-          ${state.tipo === 'planta' ? `
+          <div class="tipo-block">
+            <div class="tipo-block-head">
+              <label>Modalidad</label>
+              <div class="hint">Competencia anual entre sectores — mismo puntaje, pero el encabezado se completa a mano</div>
+            </div>
+            <div class="tipo-toggle" id="modo-toggle">
+              <button data-modo="normal" class="${!state.esCompetencia ? 'on' : 'off'}">Auditoría normal</button>
+              <button data-modo="competencia" class="${state.esCompetencia ? 'on' : 'off'}">🏆 Competencia</button>
+            </div>
+          </div>
+
+          ${state.esCompetencia ? `
+            <div class="form-grid" style="margin-top:16px;">
+              <div class="field"><label>Planta</label><input type="text" id="comp-planta" value="${esc(state.compPlanta)}" placeholder="Ej: Suipacha"></div>
+              <div class="field"><label>UET</label><input type="text" id="comp-uet" value="${esc(state.compUet)}" placeholder="Ej: UET 3"></div>
+              <div class="field"><label>Sector</label><input type="text" id="comp-sector" value="${esc(state.compSector)}" placeholder="Ej: Armado"></div>
+              <div class="field"><label>Subsector</label><input type="text" id="comp-subsector" value="${esc(state.compSubsector)}" placeholder="Ej: Armado Gas - Línea A"></div>
+            </div>
+          ` : state.tipo === 'planta' ? `
             <div class="form-grid" style="margin-top:16px;">
               <div class="field">
                 <label>Planta</label>
@@ -174,7 +198,9 @@ async function viewSeleccion() {
 
           <div class="new-record-row">
             <button class="new-record-btn" id="btn-nuevo">+ Nuevo registro</button>
-            <div class="hint" id="nuevo-hint">Elegí ${state.tipo === 'planta' ? 'planta, UET y sector' : 'un área y un sector'} para habilitar</div>
+            <div class="hint" id="nuevo-hint">${state.esCompetencia
+              ? 'Completá planta, UET, sector y subsector para habilitar'
+              : `Elegí ${state.tipo === 'planta' ? 'planta, UET y sector' : 'un área y un sector'} para habilitar`}</div>
           </div>
         </div>
       </div>
@@ -188,6 +214,7 @@ async function viewSeleccion() {
           <div class="btn-row">
             <a href="#/historial" class="btn btn-secondary" style="text-decoration:none;">🗓 Historial completo</a>
             <a href="#/plan-accion" class="btn btn-secondary" style="text-decoration:none;">📋 Plan de Acción</a>
+            <a href="#/competencia" class="btn btn-secondary" style="text-decoration:none;">🏆 Indicadores de Competencia</a>
             <a href="#/dashboard" class="btn btn-secondary" style="text-decoration:none;">Ver Dashboard →</a>
           </div>
         </div>
@@ -229,8 +256,16 @@ async function viewSeleccion() {
     document.querySelectorAll('#tipo-toggle button').forEach((btn) => {
       btn.addEventListener('click', () => { state.tipo = btn.dataset.tipo; render(); });
     });
+    document.querySelectorAll('#modo-toggle button').forEach((btn) => {
+      btn.addEventListener('click', () => { state.esCompetencia = btn.dataset.modo === 'competencia'; render(); });
+    });
 
-    if (state.tipo === 'planta') {
+    if (state.esCompetencia) {
+      const map = { 'comp-planta': 'compPlanta', 'comp-uet': 'compUet', 'comp-sector': 'compSector', 'comp-subsector': 'compSubsector' };
+      Object.entries(map).forEach(([id, key]) => {
+        document.getElementById(id).addEventListener('input', (e) => { state[key] = e.target.value; });
+      });
+    } else if (state.tipo === 'planta') {
       document.getElementById('sel-planta').addEventListener('change', (e) => {
         state.plantaId = Number(e.target.value); state.uetId = null; state.uetSectorId = null; render();
       });
@@ -464,14 +499,23 @@ async function viewHistorial(routeParams) {
 }
 
 async function crearRegistro(state) {
-  // Todo sector productivo cuelga de una UET real (Matricería y
-  // Mantenimiento son UET también), así que planta + UET + sector son los
-  // tres obligatorios para una auditoría de tipo "planta".
-  const faltaPlanta = state.tipo === 'planta' && (!state.plantaId || !state.uetId || !state.uetSectorId);
-  const faltaArea = state.tipo !== 'planta' && (!state.areaId || !state.sectorId);
-  if (faltaPlanta || faltaArea) {
-    toast('Completá la ubicación antes de crear el registro', 'error');
-    return;
+  if (state.esCompetencia) {
+    // Competencia anual: el encabezado entero se completa a mano (incluye
+    // subsectores que el catálogo general no tiene cargados).
+    if (!state.compPlanta || !state.compUet || !state.compSector || !state.compSubsector) {
+      toast('Completá planta, UET, sector y subsector antes de crear el registro de competencia', 'error');
+      return;
+    }
+  } else {
+    // Todo sector productivo cuelga de una UET real (Matricería y
+    // Mantenimiento son UET también), así que planta + UET + sector son los
+    // tres obligatorios para una auditoría de tipo "planta".
+    const faltaPlanta = state.tipo === 'planta' && (!state.plantaId || !state.uetId || !state.uetSectorId);
+    const faltaArea = state.tipo !== 'planta' && (!state.areaId || !state.sectorId);
+    if (faltaPlanta || faltaArea) {
+      toast('Completá la ubicación antes de crear el registro', 'error');
+      return;
+    }
   }
   const evaluador = window.prompt('Nombre del evaluador:', '');
   if (!evaluador) return;
@@ -479,20 +523,30 @@ async function crearRegistro(state) {
   await safeRun(async () => {
     const audit = await api.crearAuditoria({
       audit_type: state.tipo,
-      planta_id: state.plantaId,
-      uet_id: state.uetId,
-      uet_sector_id: state.uetSectorId,
-      area_id: state.areaId,
-      sector_id: state.sectorId,
       fecha: hoyISO(),
       evaluador,
       responsable: evaluador,
+      ...(state.esCompetencia ? {
+        es_competencia: true,
+        comp_planta: state.compPlanta,
+        comp_uet: state.compUet,
+        comp_sector: state.compSector,
+        comp_subsector: state.compSubsector,
+      } : {
+        planta_id: state.plantaId,
+        uet_id: state.uetId,
+        uet_sector_id: state.uetSectorId,
+        area_id: state.areaId,
+        sector_id: state.sectorId,
+      }),
     });
-    toast('Registro creado');
+    toast(state.esCompetencia ? 'Registro de competencia creado' : 'Registro creado');
     // Si este sector ya tuvo acciones correctivas pendientes en auditorías
     // anteriores, primero se revisan (y se puede puntuar el ítem ahí mismo)
-    // antes de pasar a la auditoría en sí.
-    const pendientes = await accionesPendientesDelSector(audit).catch(() => []);
+    // antes de pasar a la auditoría en sí. Una competencia no usa el
+    // catálogo (planta_id/uet_sector_id quedan NULL), así que nunca tiene
+    // plan de acción pendiente que revisar de entrada.
+    const pendientes = state.esCompetencia ? [] : await accionesPendientesDelSector(audit).catch(() => []);
     window.location.hash = pendientes.length
       ? `#/auditoria/${audit.id}/revision`
       : `#/auditoria/${audit.id}/formulario`;
@@ -512,11 +566,19 @@ async function viewFormulario(auditId) {
     <div class="card">
       <div class="card-head">
         <h2>Formulario</h2>
-        <div class="sub">${TIPO_LABEL[audit.audit_type]} · encabezado de la auditoría</div>
-        <a href="#/auditoria/${auditId}/revision" class="btn btn-secondary" style="text-decoration:none;">📋 Revisar plan de acción anterior</a>
+        <div class="sub">${TIPO_LABEL[audit.audit_type]}${audit.es_competencia ? ' · 🏆 Competencia anual' : ''} · encabezado de la auditoría</div>
+        ${!audit.es_competencia ? `<a href="#/auditoria/${auditId}/revision" class="btn btn-secondary" style="text-decoration:none;">📋 Revisar plan de acción anterior</a>` : ''}
       </div>
       <div class="card-body">
-        <div class="form-grid">
+        ${audit.es_competencia ? `
+          <div class="form-grid">
+            <div class="field"><label>Planta</label><input type="text" id="f-comp-planta" value="${esc(audit.comp_planta || '')}"></div>
+            <div class="field"><label>UET</label><input type="text" id="f-comp-uet" value="${esc(audit.comp_uet || '')}"></div>
+            <div class="field"><label>Sector</label><input type="text" id="f-comp-sector" value="${esc(audit.comp_sector || '')}"></div>
+            <div class="field"><label>Subsector</label><input type="text" id="f-comp-subsector" value="${esc(audit.comp_subsector || '')}"></div>
+          </div>
+        ` : ''}
+        <div class="form-grid" style="${audit.es_competencia ? 'margin-top:14px;' : ''}">
           <div class="field"><label>Fecha</label><input type="date" id="f-fecha" value="${(audit.fecha || '').slice(0, 10)}"></div>
           <div class="field"><label>Turno</label>
             <select id="f-turno">
@@ -544,6 +606,12 @@ async function viewFormulario(auditId) {
       supervisor_lider: document.getElementById('f-supervisor').value,
       jefe_gerente: document.getElementById('f-jefe').value,
       responsable: document.getElementById('f-responsable').value,
+      ...(audit.es_competencia ? {
+        comp_planta: document.getElementById('f-comp-planta').value,
+        comp_uet: document.getElementById('f-comp-uet').value,
+        comp_sector: document.getElementById('f-comp-sector').value,
+        comp_subsector: document.getElementById('f-comp-subsector').value,
+      } : {}),
     }), 'No se pudo guardar el formulario');
   }
 
@@ -747,7 +815,7 @@ async function viewEvaluacion(auditId) {
       <div class="card">
         <div class="card-head">
           <h2>Evaluación</h2>
-          <div class="sub">${TIPO_LABEL[audit.audit_type]} · ${audit.fecha} · Puntaje actual: <b>${totalActual()}</b>${audit.puntaje_objetivo ? ` / objetivo ${audit.puntaje_objetivo}` : ''}</div>
+          <div class="sub">${TIPO_LABEL[audit.audit_type]}${audit.es_competencia ? ' · 🏆 Competencia' : ''} · ${audit.fecha} · Puntaje actual: <b>${totalActual()}</b>${audit.puntaje_objetivo ? ` / objetivo ${audit.puntaje_objetivo}` : ''}</div>
           <a href="#/plan-accion?audit_id=${auditId}" class="btn btn-secondary" style="text-decoration:none;">📋 Plan de Acción de esta auditoría</a>
         </div>
         <div class="card-body">
@@ -1043,7 +1111,10 @@ async function viewDashboard() {
         <div class="card-head">
           <h2>Dashboard</h2>
           <div class="sub">Radar, evolución y comparativo por sector, UET y planta</div>
-          <a href="#/plan-accion" class="btn btn-secondary" style="text-decoration:none;">📋 Plan de Acción</a>
+          <div class="btn-row">
+            <a href="#/plan-accion" class="btn btn-secondary" style="text-decoration:none;">📋 Plan de Acción</a>
+            <a href="#/competencia" class="btn btn-secondary" style="text-decoration:none;">🏆 Indicadores de Competencia</a>
+          </div>
         </div>
         <div class="card-body">
           <div class="dash-filters">
@@ -1182,6 +1253,126 @@ async function viewDashboard() {
   }
 
   await safeRun(render, 'No se pudo cargar el dashboard');
+}
+
+// ===========================================================================
+// Screen · Indicadores de Competencia (competencia anual entre sectores y
+// subsectores — totalmente aparte del Dashboard habitual, ver GET /competencia.
+// Se cargan ~3 auditorías por año, eligiendo "🏆 Competencia" en Selección.)
+// ===========================================================================
+async function viewCompetencia(routeParams) {
+  setNav([{ label: 'Auditorías 5S', href: '/' }, { label: 'Competencia', href: '/competencia' }]);
+  root.innerHTML = loadingHtml();
+
+  const state = {
+    tipo: routeParams.get('tipo') || 'planta',
+    anio: routeParams.get('anio') || 'todos',
+    subsector: routeParams.get('subsector') || '',
+  };
+
+  async function render() {
+    const ind = await api.competencia({
+      tipo: state.tipo,
+      ...(state.anio !== 'todos' ? { anio: state.anio } : {}),
+      ...(state.subsector ? { subsector: state.subsector } : {}),
+    });
+
+    const segmentadorTxt = [
+      state.anio !== 'todos' ? state.anio : null,
+      state.subsector || null,
+    ].filter(Boolean).join(' · ') || 'todos los años y subsectores';
+
+    root.innerHTML = `
+      <div class="card">
+        <div class="card-head">
+          <div>
+            <h2>🏆 Indicadores de Competencia</h2>
+            <div class="sub">Competencia anual entre sectores y subsectores — no se mezcla con el Dashboard habitual</div>
+          </div>
+          <div class="btn-row no-print">
+            <button class="btn btn-secondary" id="btn-imprimir-indicadores">🖨 Imprimir indicadores</button>
+          </div>
+        </div>
+        <div class="card-body">
+          <div class="dash-filters no-print">
+            <div class="field">
+              <label>Tipo</label>
+              <select id="c-tipo">
+                ${['planta', 'panol', 'oficina'].map((t) => `<option value="${t}" ${state.tipo === t ? 'selected' : ''}>${TIPO_LABEL[t]}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Año</label>
+              <select id="c-anio">
+                <option value="todos" ${state.anio === 'todos' ? 'selected' : ''}>Todos</option>
+                ${(ind.anios_disponibles || []).map((a) => `<option value="${a}" ${String(a) === String(state.anio) ? 'selected' : ''}>${a}</option>`).join('')}
+              </select>
+            </div>
+            <div class="field">
+              <label>Subsector</label>
+              <select id="c-subsector">
+                <option value="">Todos</option>
+                ${(ind.subsectores_disponibles || []).map((s) => `<option value="${esc(s)}" ${state.subsector === s ? 'selected' : ''}>${esc(s)}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+
+          <div class="print-title" style="display:none;">
+            <h2 style="margin-bottom:2px;">Indicadores de Competencia — ${TIPO_LABEL[state.tipo]}</h2>
+            <div class="sub" style="margin-bottom:16px;">${esc(segmentadorTxt)}</div>
+          </div>
+
+          ${!ind.puntaje ? `
+            <div class="dash-empty">
+              <div class="ico">🏆</div>
+              <div class="msg">Todavía no hay auditorías de competencia para ${esc(segmentadorTxt)}</div>
+              <div class="sub">Se cargan igual que una auditoría normal, eligiendo "🏆 Competencia" en Selección.</div>
+            </div>
+          ` : `
+            <div class="dash-grid">
+              <div class="dash-card">
+                <h3>Radar 5S</h3>
+                <div class="cap">Promedio de ${ind.puntaje.n} auditoría${ind.puntaje.n === 1 ? '' : 's'} de competencia · % por categoría</div>
+                ${generateRadarSVG(ind.radar)}
+              </div>
+              <div class="dash-card">
+                <h3>Puntaje total</h3>
+                <div class="cap">Promedio entre las auditorías de competencia filtradas</div>
+                <div style="display:flex; align-items:baseline; gap:10px; margin-top:18px;">
+                  <div style="font-family:'Barlow Condensed'; font-weight:700; font-size:64px; color:var(--brand);">${ind.puntaje.promedio.toFixed(1)}</div>
+                  <div style="color:var(--ink-muted); font-size:15px;">/ 100</div>
+                </div>
+                <div style="margin-top:22px; display:flex; flex-direction:column; gap:10px;">
+                  <div style="display:flex; justify-content:space-between; font-size:13px;"><span style="color:var(--ink-muted)">Auditorías promediadas</span><b>${ind.puntaje.n}</b></div>
+                  <div style="display:flex; justify-content:space-between; font-size:13px;"><span style="color:var(--ink-muted)">Período</span><b>${ind.puntaje.desde === ind.puntaje.hasta ? ind.puntaje.desde : `${ind.puntaje.desde} → ${ind.puntaje.hasta}`}</b></div>
+                </div>
+              </div>
+              <div class="dash-card full">
+                <h3>Comparativo por subsector</h3>
+                <div class="cap">Promedio de puntaje total de cada subsector en competencia</div>
+                ${ind.comparativo_subsector.length ? generateComparativoSVG(ind.comparativo_subsector, null) : emptyStateHtml('📊', 'Sin datos por subsector todavía', '')}
+              </div>
+            </div>
+          `}
+        </div>
+      </div>
+    `;
+
+    document.getElementById('c-tipo').addEventListener('change', (e) => { state.tipo = e.target.value; state.subsector = ''; render(); });
+    document.getElementById('c-anio').addEventListener('change', (e) => { state.anio = e.target.value; render(); });
+    document.getElementById('c-subsector').addEventListener('change', (e) => { state.subsector = e.target.value; render(); });
+    document.getElementById('btn-imprimir-indicadores').addEventListener('click', () => {
+      // Vista de impresión del navegador: se muestra un título fijo (con el
+      // segmentador elegido) solo durante la impresión, y el resto de la UI
+      // (nav, filtros, botones) se oculta vía CSS (@media print / .no-print).
+      const titulo = document.querySelector('.print-title');
+      titulo.style.display = 'block';
+      window.print();
+      titulo.style.display = 'none';
+    });
+  }
+
+  await safeRun(render, 'No se pudieron cargar los indicadores de competencia');
 }
 
 // ===========================================================================
@@ -1339,13 +1530,22 @@ async function viewInforme(auditId) {
 
   const SCORE_COL = { 0: 0, 1: 1, 3: 2, 5: 3 };
   const TITLES = { planta: 'AUDITORÍA 5S - PLANTA', panol: 'AUDITORÍA 5S - PAÑOL', oficina: 'AUDITORÍA 5S - OFICINAS' };
+  // Competencia: el encabezado se completó a mano (comp_*), no viene del
+  // catálogo — se arma "Planta · UET" y "Sector · Subsector" para no perder
+  // el subsector en la réplica exacta de la Hoja 1 (que no tiene fila propia).
+  const plantaTxt = audit.es_competencia
+    ? [audit.comp_planta, audit.comp_uet].filter(Boolean).join(' · ')
+    : (audit.planta_nombre || audit.area_nombre || '—');
+  const sectorTxt = audit.es_competencia
+    ? [audit.comp_sector, audit.comp_subsector].filter(Boolean).join(' · ')
+    : (audit.uet_sector_nombre || audit.sector_nombre || '—');
 
   function tabla() {
     const rows = [];
-    rows.push(`<tr class="xls-banner"><td colspan="7">${TITLES[audit.audit_type]}</td></tr>`);
+    rows.push(`<tr class="xls-banner"><td colspan="7">${TITLES[audit.audit_type]}${audit.es_competencia ? ' — COMPETENCIA' : ''}</td></tr>`);
     rows.push(`<tr><td colspan="2" class="xls-field-label">FECHA</td><td colspan="2" class="xls-field-value">${audit.fecha}</td><td class="xls-field-label">EVALUADOR</td><td colspan="2" class="xls-field-value">${esc(audit.evaluador)}</td></tr>`);
-    rows.push(`<tr><td colspan="2" class="xls-field-label">PLANTA</td><td colspan="2" class="xls-field-value">${esc(audit.planta_nombre || audit.area_nombre || '—')}</td><td class="xls-field-label">SUPERVISOR - LÍDER</td><td colspan="2" class="xls-field-value">${esc(audit.supervisor_lider || '—')}</td></tr>`);
-    rows.push(`<tr><td colspan="2" class="xls-field-label">SECTOR</td><td colspan="2" class="xls-field-value">${esc(audit.uet_sector_nombre || audit.sector_nombre || '—')}</td><td class="xls-field-label">JEFE - GERENTE</td><td colspan="2" class="xls-field-value">${esc(audit.jefe_gerente || '—')}</td></tr>`);
+    rows.push(`<tr><td colspan="2" class="xls-field-label">PLANTA</td><td colspan="2" class="xls-field-value">${esc(plantaTxt || '—')}</td><td class="xls-field-label">SUPERVISOR - LÍDER</td><td colspan="2" class="xls-field-value">${esc(audit.supervisor_lider || '—')}</td></tr>`);
+    rows.push(`<tr><td colspan="2" class="xls-field-label">SECTOR</td><td colspan="2" class="xls-field-value">${esc(sectorTxt || '—')}</td><td class="xls-field-label">JEFE - GERENTE</td><td colspan="2" class="xls-field-value">${esc(audit.jefe_gerente || '—')}</td></tr>`);
     rows.push(`<tr><td colspan="2" class="xls-field-label">TURNO</td><td colspan="2" class="xls-field-value">${esc(audit.turno || '—')}</td><td colspan="3" class="xls-field-value" style="background:#fff;border:none;"></td></tr>`);
     rows.push(`<tr class="xls-head-row"><td colspan="2">EVALUACIÓN</td><td colspan="5"></td></tr>`);
     rows.push(`<tr class="xls-head-row"><th style="width:26px;">&quot;S&quot;Nº</th><th style="min-width:220px;">ITEM EVALUADO</th><th style="min-width:190px;">0</th><th style="min-width:190px;">1</th><th style="min-width:190px;">3</th><th style="min-width:190px;">5</th><th style="width:60px;">PUNTOS</th></tr>`);
@@ -1415,7 +1615,7 @@ async function viewInforme(auditId) {
     <div class="card">
       <div class="card-head">
         <h2>Informe</h2>
-        <div class="sub">Réplica exacta de la solapa "8. Auditoría 5S y KPI"</div>
+        <div class="sub">${audit.es_competencia ? '🏆 Competencia anual · ' : ''}Réplica exacta de la solapa "8. Auditoría 5S y KPI"</div>
       </div>
       <div class="card-body">
         <div class="imprimible-note"><b>Hoja 1</b> — este cuadro es el que exige la norma. Se genera 1:1 desde los datos cargados.</div>
@@ -1471,7 +1671,7 @@ async function viewInforme(auditId) {
     try {
       await safeRun(() => descargarInforme(audit), 'No se pudo generar el .xlsx');
 
-      const sector = audit.uet_sector_nombre || audit.sector_nombre || '—';
+      const sector = sectorTxt || '—';
       const hasPuntaje = audit.categorias.some((c) => c.items.some((it) => it.score !== null && it.score !== undefined));
       const puntaje = hasPuntaje ? `${audit.puntaje_total} / ${audit.puntaje_objetivo ?? '—'}` : 'sin puntaje aún';
 
